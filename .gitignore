@@ -1,0 +1,5 @@
+client/cache
+client/config.dat
+server/cert.key
+server/cert.pem
+server/config.dat
