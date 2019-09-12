@@ -10,7 +10,7 @@
 	// Compression support requires the CubicleSoft PHP DeflateStream class.
 	class WebServer
 	{
-		private $fp, $ssl, $initclients, $clients, $nextclientid;
+		private $fp, $ssl, $initclients, $clients, $readreadyclients, $writereadyclients, $nextclientid;
 		private $defaulttimeout, $defaultclienttimeout, $maxrequests, $defaultclientoptions, $usegzip, $cachedir;
 
 		public function __construct()
@@ -26,6 +26,8 @@
 			$this->ssl = false;
 			$this->initclients = array();
 			$this->clients = array();
+			$this->readreadyclients = array();
+			$this->writereadyclients = array();
 			$this->nextclientid = 1;
 
 			$this->defaulttimeout = 30;
@@ -68,6 +70,18 @@
 			$this->usegzip = (bool)$compress;
 		}
 
+		public static function MakeTempDir($prefix, $perms = 0770)
+		{
+			$dir = sys_get_temp_dir();
+			$dir = str_replace("\\", "/", $dir);
+			if (substr($dir, -1) !== "/")  $dir .= "/";
+			$dir .= $prefix . "_" . getmypid() . "_" . microtime(true);
+			@mkdir($dir, 0770, true);
+			@chmod($dir, $perms);
+
+			return $dir;
+		}
+
 		public function SetCacheDir($cachedir)
 		{
 			if ($cachedir !== false)
@@ -77,6 +91,11 @@
 			}
 
 			$this->cachedir = $cachedir;
+		}
+
+		public function GetCacheDir()
+		{
+			return $this->cachedir;
 		}
 
 		// Starts the server on the host and port.
@@ -130,6 +149,8 @@
 
 				$this->initclients = array();
 				$this->clients = array();
+				$this->readreadyclients = array();
+				$this->writereadyclients = array();
 				$this->fp = false;
 				$this->ssl = false;
 			}
@@ -145,6 +166,8 @@
 
 		public function AddClientRecvHeader($id, $name, $val)
 		{
+			if ($name === "" && $val === "")  return;
+
 			$client = $this->clients[$id];
 
 			if (substr($name, -2) !== "[]")  $client->requestvars[$name] = $val;
@@ -329,13 +352,14 @@
 													{
 														if ($client->currfile !== false)  $client->files[$client->currfile]->Close();
 
-														$filename = $this->cachedir . $id . "_" . count($client->files) . ".dat";
+														$filename = $this->cachedir . $id . "_" . $client->requests . "_" . count($client->files) . ".dat";
 														$client->currfile = $filename;
 
-														@unlink($filename);
+														if (!is_dir($this->cachedir))  @mkdir($this->cachedir, 0770, true);
+														if (file_exists($filename))  @unlink($filename);
 														$tempfile = new WebServer_TempFile();
 														$tempfile->filename = $filename;
-														$tempfile->Open();
+														if ($tempfile->Open() === false)  return false;
 
 														$client->files[$filename] = $tempfile;
 														$this->AddClientRecvHeader($id, $client->mime_contentdisposition["name"], $tempfile);
@@ -400,13 +424,14 @@
 						{
 							$client->contenthandled = false;
 
-							$filename = $this->cachedir . $id . ".dat";
+							$filename = $this->cachedir . $id . "_" . $client->requests . ".dat";
 							$client->currfile = $filename;
 
-							@unlink($filename);
+							if (!is_dir($this->cachedir))  @mkdir($this->cachedir, 0770, true);
+							if (file_exists($filename))  @unlink($filename);
 							$tempfile = new WebServer_TempFile();
 							$tempfile->filename = $filename;
-							$tempfile->Open();
+							if ($tempfile->Open() === false)  return false;
 
 							$client->files[$filename] = $tempfile;
 							$client->files[$filename]->Write($client->readdata);
@@ -452,6 +477,9 @@
 					if ($timeout > 1)  $timeout = 1;
 				}
 			}
+
+			if (count($this->readreadyclients))  $timeout = 0;
+
 			foreach ($this->clients as $id => $client)
 			{
 				if ($client->httpstate !== false)
@@ -464,6 +492,12 @@
 					}
 					else if (HTTP::WantRead($client->httpstate))  $readfps[$prefix . "http_c_" . $id] = $client->fp;
 					else if ($client->mode !== "init_response" && ($client->writedata !== "" || $client->httpstate["data"] !== ""))  $writefps[$prefix . "http_c_" . $id] = $client->fp;
+					else if ($client->responsefinalized)
+					{
+						$this->writereadyclients[$id] = $client->fp;
+
+						$timeout = 0;
+					}
 				}
 			}
 		}
@@ -551,6 +585,9 @@
 			$client->currfile = false;
 			$client->files = array();
 
+			// Intended for application storage.
+			$client->appdata = false;
+
 			$this->initclients[$this->nextclientid] = $client;
 
 			$this->nextclientid++;
@@ -576,6 +613,10 @@
 			}
 		}
 
+		protected function HandleResponseCompleted($id, $result)
+		{
+		}
+
 		// Handles new connections, the initial conversation, basic packet management, rate limits, and timeouts.
 		// Can wait on more streams than just sockets and/or more sockets.  Useful for waiting on other resources.
 		// 'http_s' and the 'http_c_' prefix are reserved.
@@ -592,6 +633,10 @@
 
 			// Handle new connections.
 			$this->HandleNewConnections($readfps, $writefps);
+
+			// Handle ready clients.
+			foreach ($this->readreadyclients as $id => $fp)  $readfps["http_c_" . $id] = $fp;
+			$this->readreadyclients = array();
 
 			// Handle clients in the read queue.
 			foreach ($readfps as $cid => $fp)
@@ -628,7 +673,7 @@
 						$client->mode = "init_response";
 						$client->responseheaders = array();
 						$client->responsefinalized = false;
-						$client->responsebodysize = false;
+						$client->responsebodysize = true;
 
 						$client->httpstate["type"] = "request";
 						$client->httpstate["startts"] = microtime(true);
@@ -682,12 +727,17 @@
 					else if ($client->requestcomplete === false && $client->httpstate["state"] !== "request_line" && $client->httpstate["state"] !== "headers")
 					{
 						// Allows the caller an opportunity to adjust some client options based on inputs on a per-client basis (e.g. recvlimit).
+						$this->readreadyclients[$id] = $fp;
 						$result["clients"][$id] = $client;
 					}
 				}
 
 				unset($readfps[$cid]);
 			}
+
+			// Handle ready clients.
+			foreach ($this->writereadyclients as $id => $fp)  $writefps["http_c_" . $id] = $fp;
+			$this->writereadyclients = array();
 
 			// Handle clients in the write queue.
 			foreach ($writefps as $cid => $fp)
@@ -709,10 +759,10 @@
 					{
 						if ($client->responsefinalized)
 						{
-							$client->AddResponseHeader("Content-Length", (string)strlen($client->writedata), true);
+							if ($client->responsebodysize !== false)  $client->AddResponseHeader("Content-Length", (string)strlen($client->writedata), true);
 							$client->httpstate["bodysize"] = strlen($client->writedata);
 						}
-						else if ($client->responsebodysize !== false)
+						else if ($client->responsebodysize !== true)
 						{
 							$client->AddResponseHeader("Content-Length", (string)$client->responsebodysize, true);
 							$client->httpstate["bodysize"] = $client->responsebodysize;
@@ -734,6 +784,7 @@
 						$client->responseheaders = false;
 
 						$client->httpstate["data"] .= "\r\n";
+						$client->httpstate["result"]["rawsendheadersize"] = strlen($client->httpstate["data"]);
 
 						$client->mode = "handle_response";
 					}
@@ -747,10 +798,12 @@
 						}
 						else if ($client->keepalive && $client->requests < $this->maxrequests)
 						{
-							// Reset client.
+							$this->HandleResponseCompleted($id, $result2);
+
+							// Reset client for another request.
 							$client->mode = "init_request";
+							$client->readdata = $client->httpstate["nextread"];
 							$client->httpstate = false;
-							$client->readdata = "";
 							$client->request = false;
 							$client->url = "";
 							$client->headers = false;
@@ -764,6 +817,8 @@
 
 							foreach ($client->files as $filename => $tempfile)
 							{
+								$client->files[$filename]->Free();
+
 								unset($client->files[$filename]);
 							}
 
@@ -771,9 +826,13 @@
 
 							$this->initclients[$id] = $client;
 							unset($this->clients[$id]);
+
+							if ($client->readdata !== "")  $this->readreadyclients[$id] = $fp;
 						}
 						else
 						{
+							$this->HandleResponseCompleted($id, $result2);
+
 							$result["removed"][$id] = array("result" => array("success" => true), "client" => $client);
 
 							$this->RemoveClient($id);
@@ -781,6 +840,8 @@
 					}
 					else if ($result2["errorcode"] !== "no_data")
 					{
+						$this->HandleResponseCompleted($id, $result2);
+
 						$result["removed"][$id] = array("result" => $result2, "client" => $client);
 
 						$this->RemoveClient($id);
@@ -840,7 +901,8 @@
 								$result2["rawrecv"] = "";
 							}
 
-							$client->httpstate = HTTP::InitResponseState($client->fp, $debug, $options, $startts, $timeout, $result2, false, false);
+							$client->httpstate = HTTP::InitResponseState($client->fp, $debug, $options, $startts, $timeout, $result2, false, $client->readdata, false);
+							$client->readdata = "";
 							$client->mode = "handle_request";
 
 							$client->lastts = microtime(true);
@@ -884,9 +946,14 @@
 			return $this->clients;
 		}
 
+		public function NumClients()
+		{
+			return count($this->clients);
+		}
+
 		public function GetClient($id)
 		{
-			return (isset($this->client[$id]) ? $this->client[$id] : false);
+			return (isset($this->clients[$id]) ? $this->clients[$id] : false);
 		}
 
 		public function DetachClient($id)
@@ -896,6 +963,7 @@
 			$client = $this->clients[$id];
 
 			unset($this->clients[$id]);
+			unset($this->readreadyclients[$id]);
 
 			return $client;
 		}
@@ -907,15 +975,15 @@
 				$client = $this->clients[$id];
 
 				// Remove the client.
-				foreach ($client->files as $filename => $fp2)
+				foreach ($client->files as $filename => $tempfile)
 				{
-					@fclose($fp2);
-					@unlink($filename);
+					$client->files[$filename]->Free();
 				}
 
 				if ($client->fp !== false)  @fclose($client->fp);
 
 				unset($this->clients[$id]);
+				unset($this->readreadyclients[$id]);
 			}
 		}
 	}
@@ -926,18 +994,11 @@
 	{
 		public $fp, $filename;
 
-		public function __destruct()
-		{
-			$this->Close();
-
-			@unlink($this->filename);
-		}
-
 		public function Open()
 		{
 			$this->Close();
 
-			$this->fp = @fopen($this->filename, "w+b");
+			$this->fp = fopen($this->filename, "w+b");
 
 			return $this->fp;
 		}
@@ -946,7 +1007,7 @@
 		{
 			if ($this->fp === false)  return false;
 
-			$data = @fread($this->fp, $size);
+			$data = fread($this->fp, $size);
 			if ($data === false || feof($this->fp))  $this->Close();
 			if ($data === false)  $data = "";
 
@@ -960,9 +1021,16 @@
 
 		public function Close()
 		{
-			if (is_resource($this->fp))  @fclose($this->fp);
+			if (is_resource($this->fp))  fclose($this->fp);
 
 			$this->fp = false;
+		}
+
+		public function Free()
+		{
+			$this->Close();
+
+			unlink($this->filename);
 		}
 	}
 
@@ -1007,6 +1075,8 @@
 					);
 
 					if (!isset($codemap[$code]))  $code = 500;
+
+					if ($this->responsebodysize === true && (($code >= 100 && $code < 200) || $code === 204 || $code === 304))  $this->responsebodysize = false;
 
 					$code = $code . " " . $codemap[$code];
 				}
@@ -1062,7 +1132,7 @@
 				$name = preg_replace('/\s+/', "-", trim(preg_replace('/[^A-Za-z0-9 ]/', " ", $name)));
 
 				if (!isset($this->responseheaders[$name]) || $replace)  $this->responseheaders[$name] = array();
-				$this->responseheaders[$name][] = $val;
+				$this->responseheaders[$name][] = str_replace(array("\r", "\n"), array("", ""), $val);
 			}
 		}
 
@@ -1087,8 +1157,6 @@
 			if ($this->requestcomplete && !$this->responsefinalized)
 			{
 				$this->responsebodysize = $bodysize;
-
-				if ($this->mode !== "handle_response")  $this->mode = "response_ready";
 			}
 		}
 
