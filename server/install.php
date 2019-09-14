@@ -22,8 +22,7 @@
 		),
 		"rules" => array(
 			"help" => array("arg" => false)
-		),
-		"userinput" => "="
+		)
 	);
 	$args = CLI::ParseCommandLine($options);
 

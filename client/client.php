@@ -23,9 +23,15 @@
 			"?" => "help"
 		),
 		"rules" => array(
+			"protocol" => array("arg" => true, "multiple" => true),
+			"remote_host" => array("arg" => true, "multiple" => true),
+			"remote_port" => array("arg" => true, "multiple" => true),
+			"compress" => array("arg" => true, "multiple" => true),
+			"local_ipv6" => array("arg" => true, "multiple" => true),
+			"local_port" => array("arg" => true, "multiple" => true),
+			"more" => array("arg" => true, "multiple" => true),
 			"help" => array("arg" => false)
-		),
-		"userinput" => "="
+		)
 	);
 	$args = CLI::ParseCommandLine($options);
 
