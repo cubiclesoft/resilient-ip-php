@@ -596,7 +596,7 @@ echo "Queued ACK packet.\n";
 			if ($y < 1)  return false;
 
 			// Extract the command.
-			$command = ord($data{0}) & 0x1F;
+			$command = ord($data[0]) & 0x1F;
 echo "Received command:  " . $command . "\n";
 
 			switch ($command)
@@ -609,7 +609,7 @@ echo "Received command:  " . $command . "\n";
 					if ($y < 2)  return false;
 
 					// Next byte:  6 bits reserved, 2 bits channel size.
-					$tempbyte = ord($data{1});
+					$tempbyte = ord($data[1]);
 					$channelbytes = ($tempbyte & 0x03) + 1;
 
 					if ($y < 2 + $channelbytes)  return false;
@@ -628,7 +628,7 @@ echo "Received command:  " . $command . "\n";
 					if ($y < 2)  return false;
 
 					// Next byte:  3 bits reserved, 2 bits channel size, 3 bits last packet size.
-					$tempbyte = ord($data{1});
+					$tempbyte = ord($data[1]);
 					$channelbytes = (($tempbyte >> 3) & 0x03) + 1;
 					$packetnumbytes = ($tempbyte & 0x07) + 1;
 
@@ -656,7 +656,7 @@ echo "Received command:  " . $command . "\n";
 					while ($x < $y)
 					{
 						// First bit differentiates whether the current byte is a channel byte or an information byte.
-						$tempbyte = ord($data{$x});
+						$tempbyte = ord($data[$x]);
 						$x++;
 
 						if ($tempbyte & 0x80)
@@ -724,7 +724,7 @@ echo "---- Received Packet (" . microtime(true) . ") ----\n";
 			$data = $this->cipher1->decrypt($data);
 
 			// Handle packet type.
-			$tempbyte = ord($data{1});
+			$tempbyte = ord($data[1]);
 			$packettype = ($tempbyte & 0x0F);
 echo "  Packet type:  " . $packettype . "\n";
 			if ($packettype !== 0)  return false;
@@ -751,7 +751,7 @@ echo "  Session ID:  " . $sessionid . "\n";
 			$data = $this->cipher3->decrypt($data);
 
 			// Verify server bit.
-			$tempbyte = ord($data{1});
+			$tempbyte = ord($data[1]);
 			if (($tempbyte & 0x80) === 0)  return false;
 
 			// Extract compression, fragmentation, and size details.
@@ -1187,7 +1187,7 @@ echo "Queued stop channel packet for channel " . $client->id . ".\n";
 			$y = strlen($data);
 			for ($x = 0; $x < $y; $x++)
 			{
-				$result = ($result * 256) + ord($data{$x});
+				$result = ($result * 256) + ord($data[$x]);
 			}
 
 			return $result;

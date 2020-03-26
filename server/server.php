@@ -215,7 +215,7 @@ echo "---- Received Packet (" . microtime(true) . ") ----\n";
 		$data = $mastercipher1->decrypt($data);
 
 		// Handle packet type.
-		$tempbyte = ord($data{1});
+		$tempbyte = ord($data[1]);
 		$packettype = ($tempbyte & 0x0F);
 echo "  Packet type:  " . $packettype . "\n";
 		if ($packettype !== 0)  return false;
@@ -243,7 +243,7 @@ echo "  Session ID:  " . $sessionid . "\n";
 		$data = $session->cipher3->decrypt($data);
 
 		// Verify client bit.
-		$tempbyte = ord($data{1});
+		$tempbyte = ord($data[1]);
 		if (($tempbyte & 0x80) !== 0)  return false;
 
 		// Extract compression, fragmentation, and size details.
@@ -546,7 +546,7 @@ echo "Queued ACK packet.\n";
 		if ($y < 1)  return false;
 
 		// Extract the command.
-		$command = ord($data{0}) & 0x1F;
+		$command = ord($data[0]) & 0x1F;
 echo "Received command:  " . $command . "\n";
 
 		switch ($command)
@@ -557,7 +557,7 @@ echo "Received command:  " . $command . "\n";
 				if ($y < 2)  return false;
 
 				// Next byte:  1 bit compression support, 1 bit fragmentation support (1), 2 bits channel size, 2 bits IP version (0 = IPv4, 1 = IPv6), 2 bits port number size.
-				$tempbyte = ord($data{1});
+				$tempbyte = ord($data[1]);
 				$compress = (($tempbyte & 0x80) != 0);
 				$fragment = (($tempbyte & 0x40) != 0);
 				if (!$fragment)  return false;
@@ -582,7 +582,7 @@ echo "Received command:  " . $command . "\n";
 				// Next byte:  Protocol number.
 				// TCP is 6 (0x06), UDP is 17 (0x11), ICMP is 1 (0x01).
 				// ICMP is not supported.
-				$protocol = ord($data{$x});
+				$protocol = ord($data[$x]);
 				if ($protocol === 6)  $protocol = "tcp";
 				else if ($protocol === 17)  $protocol = "udp";
 				else
@@ -597,7 +597,7 @@ echo "Received command:  " . $command . "\n";
 				// IP address.
 				if ($ipver === 0)
 				{
-					$ipaddr = ord($data{$x}) . "." . ord($data{$x + 1}) . "." . ord($data{$x + 2}) . "." . ord($data{$x + 3});
+					$ipaddr = ord($data[$x]) . "." . ord($data[$x + 1]) . "." . ord($data[$x + 2]) . "." . ord($data[$x + 3]);
 					$clientip = $ipaddr;
 					$x += 4;
 				}
@@ -692,7 +692,7 @@ echo "Queued start channel response for session " . $session->id . ".\n";
 				if ($y < 2)  return false;
 
 				// Next byte:  3 bits reserved, 2 bits channel size, 3 bits last packet size.
-				$tempbyte = ord($data{1});
+				$tempbyte = ord($data[1]);
 				$channelbytes = (($tempbyte >> 3) & 0x03) + 1;
 				$packetnumbytes = ($tempbyte & 0x07) + 1;
 
@@ -720,7 +720,7 @@ echo "Queued start channel response for session " . $session->id . ".\n";
 				while ($x < $y)
 				{
 					// First bit differentiates whether the current byte is a channel byte or an information byte.
-					$tempbyte = ord($data{$x});
+					$tempbyte = ord($data[$x]);
 					$x++;
 
 					if ($tempbyte & 0x80)
@@ -778,7 +778,7 @@ echo "Queued keep-alive packet for session " . $session->id . ".\n";
 				if ($y < 2)  return false;
 
 				// Next byte:  6 bits reserved, 2 bits channel size.
-				$tempbyte = ord($data{1});
+				$tempbyte = ord($data[1]);
 				$channelbytes = ($tempbyte & 0x03) + 1;
 
 				if ($y < 2 + $channelbytes)  return false;

@@ -89,7 +89,7 @@
 		$y = strlen($data);
 		for ($x = 0; $x < $y; $x++)
 		{
-			$result = ($result * 256) + ord($data{$x});
+			$result = ($result * 256) + ord($data[$x]);
 		}
 
 		return $result;
